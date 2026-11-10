@@ -1,228 +1,111 @@
-<div align="center">
+<p align="center">
+  <em>Store embeddings, search them with an HNSW graph, persist to one JSON file. No server, no native build, no dependencies.</em>
+</p>
 
-# Lumen
-
-### A zero-dependency vector database in pure Python
-
-Store embeddings, index them with an HNSW graph, query nearest neighbours, and
-persist everything as a single JSON document — no server, no native build, no
-third-party packages.
-
-[![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Zero Dependencies](https://img.shields.io/badge/dependencies-0-lightgrey.svg)](pyproject.toml)
-[![Platform](https://img.shields.io/badge/platform-cross--platform-cyan.svg)](https://github.com/WsNodeX/lumen)
-
-**[Why Lumen](#why-lumen) ·
-[Features](#features) ·
-[Installation](#installation) ·
-[Quick Start](#quick-start) ·
-[Architecture](#architecture) ·
-[API](#api) ·
-[Roadmap](#roadmap) ·
-[Contributing](#contributing)**
-
-</div>
+<p align="center">
+  <img src="https://img.shields.io/github/stars/WsNodeX/lumen?style=flat-square&color=111111&label=stars" alt="Stars">
+  <img src="https://img.shields.io/github/v/release/WsNodeX/lumen?style=flat-square&color=111111&label=release" alt="Release">
+  <img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT">
+</p>
 
 ---
 
-## ✨ Why Lumen
+A vector database that is a library, not a service. Fixed-dimension vectors, an
+exact brute-force index or an approximate HNSW graph, and every collection
+serialised as a single self-describing JSON document.
 
-Embedding search is everywhere — retrieval-augmented generation, duplicate
-detection, recommendation, semantic memory — yet the libraries that power it are
-usually heavyweight services you have to stand up and operate. Lumen takes the
-opposite tack: it is a **library you import**, not a system you deploy.
-
-- **No dependencies.** The whole thing is standard-library Python. Drop it into
-  any environment, from a laptop to a locked-down CI runner.
-- **No server.** A collection is one JSON file. Commit it, copy it, email it.
-- **Real algorithms.** The approximate index is a from-scratch
-  Hierarchical Navigable Small World (HNSW) graph — the same family of
-  algorithm that underpins industrial vector stores — not a toy.
-- **Small and readable.** Every layer is a few hundred lines, so you can read
-  the whole thing in an afternoon and actually understand how it works.
-
-## 🚀 Features
-
-- 🔎 **Exact and approximate search** — a brute-force `FlatIndex` for
-  correctness/reference and an `HnswIndex` for speed at scale.
-- 📐 **Five distance metrics** — `cosine`, `euclidean`, `manhattan`,
-  `chebyshev`, and `dot` (maximise dot product).
-- 🗂️ **Collections with metadata** — attach a JSON payload to every vector and
-  get it back with each search hit.
-- 💾 **Versioned JSON persistence** — each collection is a self-describing
-  document, atomically written.
-- 🧰 **Multi-collection engine** — a file-rooted `Lumen` database manages many
-  named collections.
-- ⌨️ **CLI** — add, search, list and benchmark from the terminal.
-- ✅ **Fully tested** — the suite verifies distances, exact results, HNSW recall
-  against brute force, persistence round-trips and the engine lifecycle.
-
-## 📦 Installation
-
-Lumen has no dependencies, so you can vendor it directly:
-
-```bash
-# clone and use as a package
-git clone https://github.com/WsNodeX/lumen.git
-cd lumen
-
-# or install from source
-pip install .
-```
-
-That is the entire setup. Python 3.9+ is the only requirement.
-
-## ⚡ Quick Start
+## Quick start
 
 ```python
 from lumen import Lumen
 
-db = Lumen("./.lumen-demo")
+db = Lumen("./.lumen")
+docs = db.create_collection("docs", dim=4)          # HNSW by default
 
-# Create a collection of 4-dimensional vectors.
-docs = db.create_collection("docs", dim=4, metric="cosine")
-
-# Insert vectors with optional metadata.
-docs.add("alpha", [1.0, 0.0, 0.0, 0.0], metadata={"title": "alpha"})
-docs.add("beta",  [0.0, 1.0, 0.0, 0.0], metadata={"title": "beta"})
-docs.add("gamma", [0.0, 0.0, 1.0, 0.0], metadata={"title": "gamma"})
-
-# Persist to a single JSON document.
+docs.add("a", [1, 0, 0, 0], metadata={"title": "alpha"})
+docs.add("b", [0, 1, 0, 0])
 db.persist(docs)
 
-# Query the nearest neighbour of a near-alpha vector.
-hits = db.get_collection("docs").search([0.9, 0.1, 0.0, 0.0], k=2)
-for hit in hits:
-    print(hit.id, round(hit.score, 4), hit.metadata)
+hits = db.get_collection("docs").search([0.9, 0.1, 0, 0], k=1)
+print(hits[0].id)          # 'a'
 ```
-
-**Expected output:**
-
-```
-alpha 0.0061 {'title': 'alpha'}
-beta 0.8896 {'title': 'beta'}
-```
-
-### Command line
 
 ```bash
-# add vectors
-python -m lumen add --db .lumen --name docs --id a --vec "1,0,0,0" --meta title=alpha
-python -m lumen add --db .lumen --name docs --id b --vec "0,1,0,0"
-
-# search
-python -m lumen search --db .lumen --name docs --vec "0.9,0.1,0,0" --k 2
-
-# local benchmark
-python -m lumen bench --dim 32 --n 2000 --queries 100 --index hnsw
+python -m lumen.cli add docs --id c --vector 0.1 0.9 0 0
+python -m lumen.cli search docs --vector 0 1 0 0 --k 2
 ```
 
-## 🏗️ Architecture
+## Two indexes, one interface
 
-Lumen is a small stack of single-responsibility layers. Each layer depends only
-on the one below it, which keeps the code easy to test and to swap.
+| `index_type` | Recall | Cost | Use when |
+|---|---|---|---|
+| `"flat"` | exact | O(n·d) per query | Under ~10k vectors, or correctness over latency |
+| `"hnsw"` (default) | approximate | O(log n) after build | Larger collections where a small recall loss is fine |
 
-```
-            ┌─────────────────────────────────────────────┐
-            │                CLI  (lumen.cli)              │   terminal entry point
-            └───────────────────────────┬─────────────────┘
-                                        │
-            ┌───────────────────────────┴─────────────────┐
-            │            Engine  (lumen.engine)            │   multi-collection DB, file rooted
-            └───────────────────────────┬─────────────────┘
-                                        │
-            ┌───────────────────────────┴─────────────────┐
-            │        Collection  (lumen.collection)        │   named bag + metadata + index
-            └──────────────┬───────────────────┬──────────┘
-                           │                   │
-            ┌──────────────┴──────┐  ┌─────────┴──────────┐
-            │  FlatIndex (exact)  │  │  HnswIndex (ANN)    │   VectorIndex implementations
-            └──────────────┬──────┘  └─────────┬──────────┘
-                           │                   │
-            ┌──────────────┴───────────────────┴──────────┐
-            │          Distance  (lumen.distance)          │   cosine / euclidean / ...
-            └───────────────────────────┬─────────────────┘
-                                        │
-            ┌───────────────────────────┴─────────────────┐
-            │          Storage  (lumen.storage)            │   versioned JSON documents
-            └─────────────────────────────────────────────┘
+Both satisfy the `VectorIndex` interface, so switching is one argument:
+
+```python
+exact = db.create_collection("small", dim=4, index_type="flat")
+
+tuned = db.create_collection(
+    "big", dim=384,
+    index_type="hnsw",
+    index_params={"M": 16, "ef_construction": 200, "ef": 64},
+)
 ```
 
-| Layer | Module | Responsibility |
-|-------|--------|----------------|
-| CLI | `lumen.cli` | Parse arguments; expose add / search / bench / collections. |
-| Engine | `lumen.engine` | Manage a directory of named collections; persist and reload. |
-| Collection | `lumen.collection` | Bind an index to a name, dimension, metric and metadata store. |
-| Index | `lumen.flat`, `lumen.hnsw` | Implement the `VectorIndex` contract: add / search / delete. |
-| Distance | `lumen.distance` | Pure-function metrics; every metric returns smaller = closer. |
-| Storage | `lumen.storage` | Serialise / deserialise versioned JSON collection files. |
+Five distance metrics: `chebyshev`, `cosine` (default), `dot`, `euclidean`,
+`manhattan` — pass `metric=` to `create_collection`, or list them at runtime with
+`lumen.available_metrics()`.
 
-## 🔌 API
+## How it works
 
-### `Lumen(root)` — the database
+```mermaid
+graph LR
+  A[add / upsert] --> I{index_type}
+  I -->|flat| S1[exact scan O n d]
+  I -->|hnsw| S2[graph walk O log n]
+  S1 --> R[SearchResult<br/>id · score · metadata]
+  S2 --> R
+  R --> Q[search k]
+  I --> P[persist → one JSON document]
+  P --> L[load on next start]
+```
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| create | `create_collection(name, dim, metric="cosine", index_type="hnsw", index_params=None)` | Create and persist an empty collection. |
-| get | `get_collection(name)` | Load a persisted collection by name. |
-| list | `collections()` | List collection names on disk. |
-| drop | `drop_collection(name)` | Delete a collection file. |
-| persist | `persist(collection)` | Write a collection document; returns its path. |
-| stats | `stats()` | Per-collection summary (dim, metric, count, …). |
+The HNSW implementation is the real article: a multi-layer graph, greedy descent
+from the top layer, `ef`-bounded beam search at layer 0, and bidirectional link
+maintenance with neighbour pruning. It is written to be read, which is why it is
+plain Python.
 
-### `VectorCollection` — the queryable unit
+## API
 
-| Method | Signature | Description |
-|--------|-----------|-------------|
-| add | `add(id, vector, metadata=None)` | Insert or replace a vector and its metadata. |
-| search | `search(vector, k, include_metadata=True)` | Return the `k` nearest `SearchResult`s. |
-| delete | `delete(id)` | Remove a vector; returns `True` if one was removed. |
-| stats | `stats()` | Return a `CollectionStats` snapshot. |
+| Call | Returns |
+|---|---|
+| `Lumen(root)` | A database rooted at a directory |
+| `db.create_collection(name, dim, metric="cosine", index_type="hnsw", index_params=None)` | `VectorCollection` |
+| `db.get_collection(name)` | `VectorCollection` |
+| `collection.add(id, vector, metadata=None)` | Insert or overwrite by id |
+| `collection.search(vector, k=10)` | `list[SearchResult]`, sorted by score |
+| `collection.stats()` | `CollectionStats(name, dim, metric, index_type, count)` — note this is a method here, unlike some sibling libraries |
+| `db.persist(collection)` | Write the collection to one JSON file |
 
-`SearchResult` exposes `.id`, `.score` (distance, smaller = closer) and
-`.metadata`.
+## Tests
 
-### Index selection
+```bash
+python -m pytest -q
+```
 
-| `index_type` | Class | Use when |
-|--------------|-------|----------|
-| `"flat"` | `FlatIndex` | Small datasets or when 100% exact results are required. |
-| `"hnsw"` | `HnswIndex` | Larger datasets where sub-linear query time matters. |
+## Limitations
 
-`HnswIndex` accepts `M` (connections per node), `ef_construction` (graph-build
-candidate list), `ef` (query candidate list) and `seed` (reproducibility).
+- **Pure Python.** The HNSW walk runs at Python speed, so it is slow next to
+  hnswlib or FAISS. The point is that you can read and change it.
+- **Single process.** No concurrency control — two writers on the same directory
+  corrupt the JSON. This is not a multi-tenant service.
+- **Whole-collection serialisation.** `persist` rewrites the entire document. Fine
+  to a few hundred thousand vectors, wrong beyond that.
+- **No filter expressions.** Metadata is stored and returned, never queried on;
+  pre-filter in Python before searching.
 
-### Distance metrics
+## License
 
-| Name | Meaning |
-|------|---------|
-| `cosine` | 1 − cosine similarity. |
-| `euclidean` | Straight-line L2 distance. |
-| `manhattan` | L1 sum of absolute differences. |
-| `chebyshev` | L∞ largest single-axis gap. |
-| `dot` | Negative dot product (search maximises the dot product). |
-
-## 🧭 Roadmap
-
-- [ ] Quantised (PQ/SQ) vectors to shrink memory at large scale
-- [ ] Hybrid lexical + vector scoring
-- [ ] Range search (`search_by_radius`)
-- [ ] Async / concurrent index build
-- [ ] Optional mmap-backed storage for collections larger than RAM
-- [ ] `lumen serve` HTTP endpoint with OpenAPI docs
-
-## 🤝 Contributing
-
-Contributions are welcome. The project is intentionally small, so the fastest
-path is:
-
-1. Fork and create a feature branch.
-2. Add or extend tests under `tests/` — the suite must stay green
-   (`python -m unittest discover -s tests`).
-3. Keep new code dependency-free and typed.
-4. Open a pull request describing the change and the use case.
-
-## 📄 License
-
-Released under the [MIT License](LICENSE).
+MIT
