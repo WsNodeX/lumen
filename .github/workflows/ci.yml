@@ -24,10 +24,10 @@ jobs:
       - name: Run test suite
         run: python -m unittest discover -s tests
 
-        # The examples are the first thing a visitor runs and nothing was
-        # checking them. All four repositories here had at least one example
-        # that failed from a fresh clone.
-        - name: Run examples
-          run: |
-            python examples/quickstart.py
-            python examples/benchmark.py
+      # The examples are the first thing a visitor runs and nothing was
+      # checking them. All four repositories here had at least one example
+      # that failed from a fresh clone.
+      - name: Run examples
+        run: |
+          python examples/quickstart.py
+          python examples/benchmark.py
