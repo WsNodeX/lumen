@@ -13,7 +13,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lumen import Lumen
 
-db = Lumen("./.lumen-demo")
+# A fixed path made this example fail on the second run with "collection 'docs'
+# already exists" — the first run left ./.lumen-demo behind. A fresh temp
+# directory each time keeps the example repeatable and keeps the repo clean.
+import tempfile
+
+db = Lumen(tempfile.mkdtemp(prefix="lumen-quickstart-"))
 
 # 1. Create a collection of 4-dimensional vectors.
 docs = db.create_collection("docs", dim=4, metric="cosine")
